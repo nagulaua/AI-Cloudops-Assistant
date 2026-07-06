@@ -1,0 +1,36 @@
+# Environment / secrets - never commit real credentials
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Logs (keep the sample log, ignore ad-hoc ones you test with)
+*.log
+!logs_sample/app.log
+
+# GCP service account keys if you drop one in the project by mistake
+*service-account*.json
+*credentials*.json
