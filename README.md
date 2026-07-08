@@ -1,12 +1,5 @@
 # AI CloudOps Assistant
 
-> **Requires at least one cloud (AWS or GCP).** `status` and `check-alarms`
-> need at least one of the two configured in `.env` — you don't need both,
-> but you need at least one, or those commands will error out with clear
-> instructions. Whichever cloud you *don't* configure is simply skipped.
-> (Chat and log analysis don't need any cloud credentials, just an Anthropic
-> API key.)
-
 An AI-powered assistant (using Claude) that helps you monitor **AWS and/or
 GCP** resources, triage alarms/alerts, analyze log files for root causes, and
 chat about your infrastructure — from the command line or a small HTTP API.
