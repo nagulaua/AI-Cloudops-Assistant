@@ -1,6 +1,6 @@
 # AI CloudOps Assistant
 
-An AI-powered assistant (using Claude) that helps you monitor **AWS and/or
+An AI-powered assistant (using Claude.AI) that helps you monitor **AWS and/or
 GCP** resources, triage alarms/alerts, analyze log files for root causes, and
 chat about your infrastructure — from the command line or a small HTTP API.
 
