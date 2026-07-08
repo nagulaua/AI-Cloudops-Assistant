@@ -1,6 +1,13 @@
 # AI CloudOps Assistant
 
-An AI-powered assistant (using Claude) that helps you monitor **both AWS and
+> **Requires at least one cloud (AWS or GCP).** `status` and `check-alarms`
+> need at least one of the two configured in `.env` — you don't need both,
+> but you need at least one, or those commands will error out with clear
+> instructions. Whichever cloud you *don't* configure is simply skipped.
+> (Chat and log analysis don't need any cloud credentials, just an Anthropic
+> API key.)
+
+An AI-powered assistant (using Claude) that helps you monitor **AWS and/or
 GCP** resources, triage alarms/alerts, analyze log files for root causes, and
 chat about your infrastructure — from the command line or a small HTTP API.
 
@@ -10,18 +17,20 @@ chat about your infrastructure — from the command line or a small HTTP API.
   - **AWS**: EC2 instances, S3 buckets, firing CloudWatch alarms
   - **GCP**: Compute Engine instances, Cloud Storage buckets, enabled Cloud
     Monitoring alert policies
-  - Use `--provider aws` or `--provider gcp` to check just one cloud
+  - Use `--provider aws` or `--provider gcp` to display just one cloud's results
 - **`chat`** — interactive terminal chat with an SRE-flavored Claude assistant
 - **`analyze-logs`** — extracts error/warning lines from a log file and asks Claude
   to summarize the likely root cause and next steps
-- **`check-alarms`** — checks CloudWatch alarms *and* Cloud Monitoring alert
-  policies, and optionally posts a combined summary to Slack
+- **`check-alarms`** — checks CloudWatch alarms and/or Cloud Monitoring alert
+  policies (whichever is configured), and optionally posts a combined
+  summary to Slack
 - **`serve`** — runs the same functionality as a FastAPI HTTP server
   (`/status`, `/chat`, `/analyze-logs`, `/alarms`, `/gcp-alerts`, `/health`)
 
-Both clouds are **optional and independent** — the app works fine with only
-AWS configured, only GCP configured, or both. Anything not configured is
-skipped with a clear message rather than causing an error.
+**At least one cloud is required** for `status` and `check-alarms` — you can
+configure just AWS, just GCP, or both. If neither is configured, those two
+commands return a clear error telling you what to set in `.env`. `chat` and
+`analyze-logs` are unaffected either way — they only need the Anthropic key.
 
 ## Project Structure
 
@@ -49,17 +58,23 @@ ai-cloudops-assistant/
 - Python 3.9+
 - An Anthropic API key (for `chat` / `analyze-logs`) — get one at
   https://console.anthropic.com/
-- AWS credentials (for AWS status/alarms) — any of the standard boto3
-  credential sources work: environment variables, `~/.aws/credentials`, an
-  AWS profile, or an EC2/ECS instance role.
-- GCP credentials (for GCP status/alerts) — either:
-  - a service account key file referenced by `GOOGLE_APPLICATION_CREDENTIALS`, or
-  - Application Default Credentials via `gcloud auth application-default login`, or
-  - the metadata server if running on GCE/GKE/Cloud Run
-  You'll also need `GCP_PROJECT_ID` set in `.env`.
+- **At least one of AWS or GCP credentials (required for `status`/`check-alarms`):**
+  - **AWS** — any of the standard boto3 credential sources: environment
+    variables, `~/.aws/credentials`, an AWS profile, or an EC2/ECS instance
+    role (set `AWS_USE_INSTANCE_ROLE=1` in `.env` in that last case, since it
+    can't be auto-detected).
+  - **GCP** — either:
+    - **Application Default Credentials (simplest, recommended)**: install
+      the `gcloud` CLI, then run `gcloud auth application-default login` and
+      `gcloud config get-value project` to find your project ID. Leave
+      `GOOGLE_APPLICATION_CREDENTIALS` blank in `.env` — ADC is picked up
+      automatically.
+    - a service account key file referenced by `GOOGLE_APPLICATION_CREDENTIALS`, or
+    - the metadata server if running on GCE/GKE/Cloud Run
+    You'll also need `GCP_PROJECT_ID` set in `.env` either way.
 
-Both AWS and GCP are **optional** — chat and log analysis work with neither
-configured, and `status`/`check-alarms` simply skip whichever cloud isn't set up.
+`status` and `check-alarms` will refuse to run only if **neither** cloud is
+configured. `chat` and `analyze-logs` only need the Anthropic key.
 
 ## Setup
 
@@ -72,9 +87,24 @@ cd ai-cloudops-assistant
 
 **2. Create a virtual environment and install dependencies**
 
+macOS/Linux:
 ```bash
 python3 -m venv venv
-source venv/bin/activate          # on Windows: venv\Scripts\activate
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Windows (Git Bash) — note `python` instead of `python3`, and `Scripts` instead of `bin`:
+```bash
+python -m venv venv
+source venv/Scripts/activate
+pip install -r requirements.txt
+```
+
+Windows (Command Prompt / PowerShell):
+```
+python -m venv venv
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -90,24 +120,29 @@ Then edit `.env` and fill in at least:
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Add AWS and/or GCP values too, depending on which cloud(s) you want `status` /
-`check-alarms` to check:
+On Windows (Git Bash), you can open it in Notepad with `notepad .env`. Make
+sure there are no extra spaces around the `=` and no quotes around the value.
+
+**For `status`/`check-alarms`, add at least one of these two blocks** (both
+is fine too — leaving both out is the only thing that causes an error):
 
 ```
-# AWS - if you already have ~/.aws/credentials set up with a profile,
-# just set AWS_PROFILE instead of pasting keys directly.
+# AWS (add this and/or the GCP block below) - if you already have
+# ~/.aws/credentials set up with a profile, just set AWS_PROFILE instead
+# of pasting keys directly.
 AWS_PROFILE=your-profile-name
 AWS_REGION=us-east-1
 
-# GCP - GCP_PROJECT_ID is what tells the assistant to check GCP at all.
+# GCP (add this and/or the AWS block above)
 GCP_PROJECT_ID=your-gcp-project-id
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 GCP_ZONES=us-central1-a,us-east1-b
 ```
 
-If you skip the AWS block, AWS checks are skipped. If you skip
-`GCP_PROJECT_ID`, GCP checks are skipped. You can configure either one, both,
-or neither.
+If you only fill in one block, the other cloud is simply skipped (shown as
+"skipped" in `status` output) rather than causing an error — only skipping
+**both** blocks causes `status`/`check-alarms` to stop with a `RuntimeError`.
+`chat` and `analyze-logs` are unaffected either way.
 
 ## Running It
 
@@ -183,26 +218,20 @@ pytest tests/ -v
 
 ## Troubleshooting
 
-- **`ANTHROPIC_API_KEY is not set`** — make sure you copied `.env.example` to
-  `.env` and filled in a real key, and that you're running commands from the
-  project root (so `.env` is found).
-- **AWS `NoCredentialsError` / access denied** — either export
-  `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, set `AWS_PROFILE` to a profile
-  in `~/.aws/credentials`, or run from an environment with an attached IAM role.
-  `status` and `check-alarms` will report the error clearly rather than crashing.
-- **GCP checks always show "skipped"** — set `GCP_PROJECT_ID` in `.env`; that's
-  the flag that turns GCP checks on.
-- **GCP `DefaultCredentialsError` / permission denied** — either set
-  `GOOGLE_APPLICATION_CREDENTIALS` to a service account JSON key path, or run
-  `gcloud auth application-default login` first. The service account/user
-  needs at least `roles/compute.viewer`, `roles/storage.objectViewer` (or
-  broader), and `roles/monitoring.viewer`.
-- **`ModuleNotFoundError`** — make sure your virtual environment is activated
-  and `pip install -r requirements.txt` completed without errors.
-
-## Notes
-
-- This project makes real calls to the Anthropic API and (optionally) AWS/GCP —
-  standard usage costs/rate limits for all three apply.
-- Nothing here modifies your cloud resources; all AWS and GCP calls are
-  read-only (`describe_*` / `list_*`).
+- **`ANTHROPIC_API_KEY is not set`** — copy `.env.example` to `.env`, fill in
+  a real key (not the placeholder text), and run commands from the project root.
+- **`anthropic.AuthenticationError: invalid x-api-key`** — the key is wrong
+  or still the placeholder. Check with `grep ANTHROPIC_API_KEY .env`.
+- **`anthropic.BadRequestError: credit balance is too low`** — add credits at
+  https://console.anthropic.com/settings/billing.
+- **AWS `NoCredentialsError` / access denied** — set `AWS_PROFILE` or
+  `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` in `.env`, or run from an
+  environment with an IAM role attached.
+- **`RuntimeError: This project requires at least one cloud`** — neither
+  AWS nor GCP is configured in `.env`; set up at least one (see Prerequisites).
+- **GCP `DefaultCredentialsError` / permission denied** — run
+  `gcloud auth application-default login`, or set
+  `GOOGLE_APPLICATION_CREDENTIALS` to a service account key path.
+- **`ModuleNotFoundError`** — activate the venv and re-run
+  `pip install -r requirements.txt`.
+- **Windows: `python3` not found** — use `python` instead throughout.

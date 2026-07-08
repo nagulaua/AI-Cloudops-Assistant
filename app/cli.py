@@ -27,8 +27,13 @@ def cli():
 @click.option("--json-out", is_flag=True, help="Print raw JSON instead of a table.")
 @click.option("--provider", type=click.Choice(["all", "aws", "gcp"]), default="all", help="Limit status to one provider.")
 def status(json_out, provider):
-    """Show a snapshot of AWS (EC2/S3/CloudWatch) and GCP (GCE/GCS/Monitoring) resources."""
-    snapshot = full_status_snapshot()
+    """Show a snapshot of AWS (EC2/S3/CloudWatch) and GCP (GCE/GCS/Monitoring) resources.
+    At least one of AWS or GCP must be configured in .env."""
+    try:
+        snapshot = full_status_snapshot()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
 
     if json_out:
         console.print_json(json.dumps(snapshot))
@@ -39,34 +44,37 @@ def status(json_out, provider):
         console.rule("[bold yellow]AWS[/bold yellow]")
         aws = snapshot["aws"]
 
-        ec2 = aws["ec2"]
-        if "error" in ec2:
-            console.print(f"[red]EC2 error:[/red] {ec2['error']}")
+        if aws.get("skipped"):
+            console.print(f"[dim]AWS checks skipped: {aws['reason']}[/dim]")
         else:
-            table = Table(title=f"EC2 Instances ({ec2['count']})")
-            table.add_column("Name")
-            table.add_column("ID")
-            table.add_column("State")
-            table.add_column("Type")
-            table.add_column("AZ")
-            for i in ec2["instances"]:
-                state_color = "green" if i["state"] == "running" else "yellow"
-                table.add_row(i["name"], i["id"], f"[{state_color}]{i['state']}[/{state_color}]", i["type"], i["az"] or "-")
-            console.print(table)
+            ec2 = aws["ec2"]
+            if "error" in ec2:
+                console.print(f"[red]EC2 error:[/red] {ec2['error']}")
+            else:
+                table = Table(title=f"EC2 Instances ({ec2['count']})")
+                table.add_column("Name")
+                table.add_column("ID")
+                table.add_column("State")
+                table.add_column("Type")
+                table.add_column("AZ")
+                for i in ec2["instances"]:
+                    state_color = "green" if i["state"] == "running" else "yellow"
+                    table.add_row(i["name"], i["id"], f"[{state_color}]{i['state']}[/{state_color}]", i["type"], i["az"] or "-")
+                console.print(table)
 
-        s3 = aws["s3"]
-        if "error" in s3:
-            console.print(f"[red]S3 error:[/red] {s3['error']}")
-        else:
-            console.print(f"[bold]S3 Buckets ({s3['count']}):[/bold] {', '.join(s3['buckets']) or '(none)'}")
+            s3 = aws["s3"]
+            if "error" in s3:
+                console.print(f"[red]S3 error:[/red] {s3['error']}")
+            else:
+                console.print(f"[bold]S3 Buckets ({s3['count']}):[/bold] {', '.join(s3['buckets']) or '(none)'}")
 
-        alarms = aws["alarms"]
-        if "error" in alarms:
-            console.print(f"[red]CloudWatch error:[/red] {alarms['error']}")
-        else:
-            console.print(f"[bold]Firing CloudWatch Alarms ({alarms['count']}):[/bold]")
-            for a in alarms["alarms"]:
-                console.print(f"  [red]● {a['name']}[/red] - {a['reason']}")
+            alarms = aws["alarms"]
+            if "error" in alarms:
+                console.print(f"[red]CloudWatch error:[/red] {alarms['error']}")
+            else:
+                console.print(f"[bold]Firing CloudWatch Alarms ({alarms['count']}):[/bold]")
+                for a in alarms["alarms"]:
+                    console.print(f"  [red]● {a['name']}[/red] - {a['reason']}")
 
     # --- GCP ---
     if provider in ("all", "gcp"):
@@ -145,19 +153,29 @@ def chat():
 @cli.command()
 def check_alarms():
     """Check CloudWatch (AWS) and Cloud Monitoring (GCP) alerts, and send a
-    Slack alert summarizing anything firing/enabled across both."""
+    Slack alert summarizing anything firing/enabled. At least one of AWS or
+    GCP must be configured in .env."""
+    try:
+        settings.require_at_least_one_cloud()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+
     message_parts = []
 
-    alarms = get_cloudwatch_alarms()
-    if "error" in alarms:
-        console.print(f"[red]AWS error:[/red] {alarms['error']}")
-    elif alarms["count"] == 0:
-        console.print("[green]AWS: no alarms firing.[/green]")
+    if settings.aws_configured():
+        alarms = get_cloudwatch_alarms()
+        if "error" in alarms:
+            console.print(f"[red]AWS error:[/red] {alarms['error']}")
+        elif alarms["count"] == 0:
+            console.print("[green]AWS: no alarms firing.[/green]")
+        else:
+            lines = [f"- {a['name']}: {a['reason']}" for a in alarms["alarms"]]
+            part = f"🚨 AWS: {alarms['count']} CloudWatch alarm(s) firing:\n" + "\n".join(lines)
+            console.print(part)
+            message_parts.append(part)
     else:
-        lines = [f"- {a['name']}: {a['reason']}" for a in alarms["alarms"]]
-        part = f"🚨 AWS: {alarms['count']} CloudWatch alarm(s) firing:\n" + "\n".join(lines)
-        console.print(part)
-        message_parts.append(part)
+        console.print("[dim]AWS checks skipped: not configured.[/dim]")
 
     if settings.gcp_configured():
         mon = get_monitoring_alerts()

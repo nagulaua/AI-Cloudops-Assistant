@@ -30,3 +30,38 @@ def test_settings_load_without_crashing():
     # Should not raise even if no .env / API keys are configured.
     assert settings.aws_region  # has a default
     assert isinstance(settings.anthropic_configured(), bool)
+
+
+def test_require_at_least_one_cloud_raises_when_none_configured():
+    # Temporarily clear cloud config to verify the validation error fires
+    # with a clear, actionable message when NEITHER cloud is configured.
+    original_aws_profile = settings.aws_profile
+    original_aws_key = settings.aws_access_key_id
+    original_gcp_project = settings.gcp_project_id
+    settings.aws_profile = ""
+    settings.aws_access_key_id = ""
+    settings.gcp_project_id = ""
+    try:
+        try:
+            settings.require_at_least_one_cloud()
+            assert False, "should have raised RuntimeError"
+        except RuntimeError as exc:
+            assert "AWS" in str(exc)
+            assert "GCP" in str(exc)
+    finally:
+        settings.aws_profile = original_aws_profile
+        settings.aws_access_key_id = original_aws_key
+        settings.gcp_project_id = original_gcp_project
+
+
+def test_require_at_least_one_cloud_passes_with_only_one_configured():
+    # Only AWS configured, GCP not - should NOT raise (at least one is enough).
+    original_aws_profile = settings.aws_profile
+    original_gcp_project = settings.gcp_project_id
+    settings.aws_profile = "some-profile"
+    settings.gcp_project_id = ""
+    try:
+        settings.require_at_least_one_cloud()  # should not raise
+    finally:
+        settings.aws_profile = original_aws_profile
+        settings.gcp_project_id = original_gcp_project

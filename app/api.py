@@ -38,8 +38,12 @@ def health():
 @app.get("/status")
 def status():
     """Return a combined AWS + GCP snapshot (EC2/S3/CloudWatch and GCE/GCS/Monitoring).
-    GCP is skipped automatically if GCP_PROJECT_ID isn't configured."""
-    return full_status_snapshot()
+    At least one of AWS or GCP must be configured in .env; whichever isn't
+    configured is returned as a "skipped" entry."""
+    try:
+        return full_status_snapshot()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/alarms")
@@ -52,7 +56,10 @@ def alarms(state: str = "ALARM"):
 def gcp_alerts():
     """GCP Cloud Monitoring enabled alert policies."""
     if not settings.gcp_configured():
-        return {"skipped": True, "reason": "GCP_PROJECT_ID not set in .env"}
+        raise HTTPException(
+            status_code=400,
+            detail="GCP_PROJECT_ID not set in .env - configure GCP to use this endpoint.",
+        )
     return get_monitoring_alerts()
 
 
